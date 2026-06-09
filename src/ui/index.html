@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Garo Produções</title>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div class="header">
+    <span class="logo">🎬 Garo Produções</span>
+    <span id="encoder-badge" class="badge">detectando...</span>
+  </div>
+
+  <div class="record-panel">
+    <div id="status-dot" class="dot idle"></div>
+    <div id="timer" class="timer">00:00:00</div>
+    <button id="btn-record" class="btn-record idle">⏺ INICIAR GRAVAÇÃO</button>
+    <div class="hotkeys">F9 iniciar &nbsp;•&nbsp; F10 parar</div>
+  </div>
+
+  <div class="section-title">Configurações</div>
+  <div class="settings">
+
+    <div class="row">
+      <label title="Escolha qual tela ou janela será gravada.&#10;&#10;📺 Telas — grava um monitor inteiro&#10;🗔 Janelas — grava apenas um aplicativo">
+        Fonte <span class="hint">(?)</span>
+      </label>
+      <button id="btn-source" class="source-btn">🖥 Tela inteira</button>
+    </div>
+
+    <div class="row">
+      <label title="Tecnologia usada para comprimir o vídeo.&#10;&#10;AMF  → usa a GPU AMD (recomendado para AMD)&#10;NVENC → usa a GPU NVIDIA&#10;CPU  → mais lento, funciona em qualquer PC">
+        Encoder <span class="hint">(?)</span>
+      </label>
+      <select id="encoder">
+        <option value="auto">Auto detectar</option>
+        <option value="hevc_amf">H.265 / AMF (AMD)</option>
+        <option value="hevc_nvenc">H.265 / NVENC (NVIDIA)</option>
+        <option value="h264_amf">H.264 / AMF (AMD)</option>
+        <option value="h264_nvenc">H.264 / NVENC (NVIDIA)</option>
+        <option value="libx264">H.264 / CPU</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label title="Quadros por segundo gravados.&#10;&#10;Deve ser igual ao Hz do seu monitor.&#10;Monitor 60Hz  → use 60 fps&#10;Monitor 144Hz → use 144 fps&#10;&#10;Mais fps = arquivo maior.">
+        FPS <span class="hint">(?)</span>
+      </label>
+      <select id="fps">
+        <option value="30">30 fps</option>
+        <option value="60" selected>60 fps</option>
+        <option value="120">120 fps</option>
+        <option value="144">144 fps</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label title="Quantidade de dados por segundo no vídeo.&#10;Mais Mbps = melhor qualidade e arquivo maior.&#10;&#10;1080p → 40–60 Mbps&#10;1440p → 60–80 Mbps&#10;4K    → 80–150 Mbps">
+        Qualidade <span class="hint">(?)</span>
+      </label>
+      <div class="bitrate-row">
+        <input type="range" id="bitrate" min="10" max="200" step="5" value="80"
+               oninput="document.getElementById('bitrate-val').textContent = this.value + ' Mbps'">
+        <span id="bitrate-val">80 Mbps</span>
+      </div>
+    </div>
+
+    <div class="row">
+      <label title="Captura de áudio indisponível nesta versão.&#10;Em breve: suporte a DirectShow (Stereo Mix).">
+        Áudio sistema <span class="hint">(?)</span>
+      </label>
+      <span style="color:#666;font-size:12px;align-self:center">indisponível</span>
+    </div>
+
+    <div class="row">
+      <label title="Pasta onde os vídeos serão salvos.&#10;&#10;Clique no campo ou nos '...' para escolher.&#10;Os arquivos são nomeados com data e hora.">
+        Pasta de saída <span class="hint">(?)</span>
+      </label>
+      <div class="folder-row">
+        <input type="text" id="output-folder" readonly placeholder="Selecione uma pasta..."
+               onclick="window._abrirPasta()">
+        <button id="btn-folder" onclick="window._abrirPasta()">...</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-title">
+    Gravações recentes
+    <button id="btn-refresh" class="btn-sm" title="Atualizar lista">↻</button>
+  </div>
+  <div id="recent-list" class="recent-list">
+    <div class="empty">Nenhuma gravação ainda</div>
+  </div>
+
+  <!-- Modal seletor de fonte -->
+  <div id="source-modal" class="source-modal hidden">
+    <div class="source-modal-box">
+      <div class="source-modal-header">
+        <span>Selecionar fonte de captura</span>
+        <button id="source-modal-close">✕</button>
+      </div>
+      <div class="source-tabs">
+        <button class="source-tab active" data-tab="screen">📺 Telas</button>
+        <button class="source-tab" data-tab="window">🗔 Janelas</button>
+      </div>
+      <div id="source-grid" class="source-grid"></div>
+      <div class="source-modal-footer">
+        <button id="btn-source-cancel">Cancelar</button>
+        <button id="btn-source-confirm" class="btn-confirm" disabled>Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="index.js"></script>
+</body>
+</html>

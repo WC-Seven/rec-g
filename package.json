@@ -1,0 +1,43 @@
+{
+  "name": "garo",
+  "version": "1.0.0",
+  "description": "Gravador de tela com encoding por hardware AMD/NVIDIA",
+  "main": "main.js",
+  "author": "Wellington Monteiro <wellington.monteiro@dayonesystem.com.br>",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "dist:all": "electron-builder --win nsis portable"
+  },
+  "build": {
+    "appId": "com.dayonesystem.garo",
+    "productName": "Garo Produções",
+    "copyright": "© 2025 Wellington Monteiro",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "src/**/*", "package.json"],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Garo Produções",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "Garo-portable.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0"
+  }
+}
