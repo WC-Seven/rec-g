@@ -14,10 +14,18 @@ contextBridge.exposeInMainWorld('garo', {
   getSources:     ()  => ipcRenderer.invoke('get-sources'),
   getDisplays:    ()  => ipcRenderer.invoke('get-displays'),
 
+  // WGC mode
+  wgcStartWrite:  (t) => ipcRenderer.invoke('wgc-start-write', t),
+  wgcChunk:       (c) => ipcRenderer.invoke('wgc-chunk', c),
+  wgcFinalize:    (p) => ipcRenderer.invoke('wgc-finalize', p),
+  wgcError:       (m) => ipcRenderer.invoke('wgc-error', m),
+
   onInit:              (cb) => ipcRenderer.on('init',              (_, d) => cb(d)),
   onRecordingStarted:  (cb) => ipcRenderer.on('recording-started', (_, d) => cb(d)),
   onRecordingStopped:  (cb) => ipcRenderer.on('recording-stopped', (_, d) => cb(d)),
   onRecordingProgress: (cb) => ipcRenderer.on('recording-progress',(_, d) => cb(d)),
   onRecordingError:    (cb) => ipcRenderer.on('recording-error',   (_, d) => cb(d)),
   onRecordingWarn:     (cb) => ipcRenderer.on('recording-warn',    (_, d) => cb(d)),
+  onWgcStart:          (cb) => ipcRenderer.on('wgc-start',         (_, d) => cb(d)),
+  onWgcStop:           (cb) => ipcRenderer.on('wgc-stop',          ()     => cb()),
 })

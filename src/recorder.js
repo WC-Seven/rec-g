@@ -53,13 +53,16 @@ class Recorder extends EventEmitter {
   _buildVideoArgs(fps, source) {
     const src = source || {}
 
-    // physicalBounds vem de main.js ja em pixels fisicos prontos para o gdigrab
+    // Sempre usa desktop + offset: captura a partir do compositor do Windows,
+    // o que inclui conteúdo renderizado por GPU (Electron, Chrome, DX12, etc).
+    // gdigrab title= usa BitBlt GDI e retorna preto para apps com GPU rendering.
     const pb = src.physicalBounds
     if (pb && pb.width > 0 && pb.height > 0) {
       const w = Math.max(2, Math.floor(pb.width  / 2) * 2)
       const h = Math.max(2, Math.floor(pb.height / 2) * 2)
       const x = Math.max(0, pb.x)
       const y = Math.max(0, pb.y)
+      console.log(`[FFmpeg] Capturando area: offset=${x},${y} size=${w}x${h}${src.gdigrabTitle ? ` (janela: ${src.gdigrabTitle})` : ''}`)
       return [
         '-f', 'gdigrab', '-framerate', String(fps),
         '-offset_x', String(x),
@@ -69,7 +72,7 @@ class Recorder extends EventEmitter {
       ]
     }
 
-    // Fallback: captura desktop inteiro (evitado por main.js, mas mantido por seguranca)
+    // Fallback: desktop inteiro
     return ['-f', 'gdigrab', '-framerate', String(fps), '-i', 'desktop']
   }
 
@@ -143,11 +146,18 @@ class Recorder extends EventEmitter {
       console.log(`[FFmpeg] encerrou com codigo ${code} (encoder: ${encoder})`)
 
       if (code !== 0) {
+        // gdigrab area error — not an encoder problem, never retry
+        if (stderrLog.includes('Error opening input') || stderrLog.includes('extends outside window area')) {
+          this.emit('error', new Error('Área de captura inválida. Reabra o app e selecione a fonte novamente.'))
+          return
+        }
+
+        // Only treat as hardware error when the encoder context line appears: [hevc_qsv @ 0x...]
+        // Avoids matching "--enable-nvenc" or "libvpl" in the FFmpeg config string printed to every stderr.
         const isHwError =
           stderrLog.includes('amfrt64') ||
-          stderrLog.includes('DLL') ||
-          stderrLog.includes('nvenc') ||
-          stderrLog.includes('qsv') ||
+          stderrLog.includes('DLL load failed') ||
+          /\[(?:h264|hevc)_(?:amf|nvenc|qsv) @ /.test(stderrLog) ||
           stderrLog.includes('Error while opening encoder') ||
           stderrLog.includes('Conversion failed')
 

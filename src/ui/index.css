@@ -332,6 +332,15 @@ input[type="range"] {
   display: block;
   background: #0a0a1a;
 }
+.thumb-placeholder {
+  width: 100%;
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a1a;
+  font-size: 28px;
+}
 .source-card .source-name {
   padding: 4px 6px;
   font-size: 10px;

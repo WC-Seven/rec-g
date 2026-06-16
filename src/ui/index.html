@@ -29,6 +29,16 @@
     </div>
 
     <div class="row">
+      <label title="FFmpeg: melhor qualidade, hardware encoding (hevc_qsv/amf/nvenc). Captura a região da tela.&#10;&#10;WGC: captura somente a janela selecionada, sem outras janelas visíveis. Requer Windows 10 1903+.">
+        Modo <span class="hint">(?)</span>
+      </label>
+      <select id="capture-mode">
+        <option value="ffmpeg">FFmpeg — hardware encoding</option>
+        <option value="wgc">WGC — isolamento de janela</option>
+      </select>
+    </div>
+
+    <div class="row">
       <label title="Tecnologia usada para comprimir o vídeo.&#10;&#10;AMF  → usa a GPU AMD (recomendado para AMD)&#10;NVENC → usa a GPU NVIDIA&#10;CPU  → mais lento, funciona em qualquer PC">
         Encoder <span class="hint">(?)</span>
       </label>

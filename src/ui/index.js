@@ -82,8 +82,9 @@ function markRecommended(selectId, recommendedValue) {
 }
 
 function applySettings(s) {
-  document.getElementById('encoder').value = s.encoder || 'auto'
-  document.getElementById('fps').value     = String(s.fps || 60)
+  document.getElementById('encoder').value       = s.encoder      || 'auto'
+  document.getElementById('fps').value           = String(s.fps   || 60)
+  document.getElementById('capture-mode').value  = s.captureMode  || 'ffmpeg'
   bitrateSlider.value = s.bitrate || 80
   bitrateVal.textContent = (s.bitrate || 80) + ' Mbps'
   document.getElementById('output-folder').value = s.outputFolder || ''
@@ -99,6 +100,7 @@ async function collectSettings() {
     encoder:      document.getElementById('encoder').value,
     fps:          parseInt(document.getElementById('fps').value),
     bitrate:      parseInt(bitrateSlider.value),
+    captureMode:  document.getElementById('capture-mode').value,
     captureAudio: false,
     outputFolder: document.getElementById('output-folder').value,
     source:       saved.source || { type: 'desktop', name: 'Tela inteira' },
@@ -166,6 +168,7 @@ btnRecord.addEventListener('click', async () => {
 // Settings
 document.getElementById('encoder').addEventListener('change', autoSave)
 document.getElementById('fps').addEventListener('change', autoSave)
+document.getElementById('capture-mode').addEventListener('change', autoSave)
 bitrateSlider.addEventListener('change', autoSave)
 
 // ── Seletor de fonte ──────────────────────────────────────────
@@ -203,13 +206,17 @@ function renderSourceGrid() {
     return
   }
 
-  grid.innerHTML = filtered.map((s, i) => `
+  grid.innerHTML = filtered.map((s, i) => {
+    const thumb = s.thumbnail
+      ? `<img src="${s.thumbnail}" alt="${s.name}">`
+      : `<div class="thumb-placeholder">${s.type === 'screen' ? '🖥' : '🗔'}</div>`
+    return `
     <div class="source-card${selectedSource && selectedSource.id === s.id ? ' selected' : ''}"
          data-idx="${i}" onclick="window._selectSource(${i})">
-      <img src="${s.thumbnail}" alt="${s.name}">
+      ${thumb}
       <div class="source-name" title="${s.name}">${s.name}</div>
-    </div>
-  `).join('')
+    </div>`
+  }).join('')
 }
 
 window._selectSource = function (idx) {
@@ -277,6 +284,66 @@ window._abrirPasta = async function () {
 }
 
 document.getElementById('btn-refresh').addEventListener('click', loadRecent)
+
+// ── WGC Recording (MediaRecorder via Chromium WGC) ───────────────────────────
+let wgcRecorder = null
+let wgcStream   = null
+
+garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate }) => {
+  try {
+    wgcStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        mandatory: {
+          chromeMediaSource:   'desktop',
+          chromeMediaSourceId: sourceId,
+          maxFrameRate: 60,
+        },
+      },
+    })
+
+    const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=h264', 'video/webm']
+      .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm'
+
+    wgcRecorder = new MediaRecorder(wgcStream, {
+      mimeType,
+      videoBitsPerSecond: Math.min(bitrate || 20, 80) * 1024 * 1024,
+    })
+
+    await garo.wgcStartWrite(tempPath)
+
+    wgcRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        e.data.arrayBuffer().then(buf => {
+          garo.wgcChunk(Array.from(new Uint8Array(buf)))
+        })
+      }
+    }
+
+    wgcRecorder.onstop = async () => {
+      wgcStream && wgcStream.getTracks().forEach(t => t.stop())
+      wgcStream = null
+      showToast('Finalizando gravação WGC...', 8000)
+      await garo.wgcFinalize(outputPath)
+    }
+
+    wgcRecorder.start(1000)
+    console.log('[WGC] Iniciado com', mimeType)
+
+  } catch (e) {
+    console.error('[WGC] Erro:', e)
+    wgcStream && wgcStream.getTracks().forEach(t => t.stop())
+    wgcStream = null
+    await garo.wgcError(e.message)
+  }
+})
+
+garo.onWgcStop(() => {
+  if (wgcRecorder && wgcRecorder.state !== 'inactive') {
+    wgcRecorder.stop()
+    wgcRecorder = null
+  }
+})
 
 // Eventos de gravação
 garo.onRecordingStarted(() => {

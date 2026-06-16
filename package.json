@@ -16,6 +16,7 @@
     "copyright": "© 2025 Wellington Monteiro",
     "directories": { "output": "dist" },
     "files": ["main.js", "preload.js", "src/**/*", "package.json"],
+    "asarUnpack": ["node_modules/ffmpeg-static/**"],
     "win": {
       "target": [
         { "target": "nsis", "arch": ["x64"] },

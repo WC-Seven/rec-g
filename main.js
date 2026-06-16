@@ -2,8 +2,37 @@ const { app, BrowserWindow, globalShortcut, Tray, Menu, ipcMain, dialog, nativeI
 const path = require('path')
 const os   = require('os')
 const fs   = require('fs')
-const { execFile } = require('child_process')
+const { execFile, spawn } = require('child_process')
 const { Recorder } = require('./src/recorder')
+
+let ffmpegPath
+try { ffmpegPath = require('ffmpeg-static') } catch { ffmpegPath = 'ffmpeg' }
+
+// Estado do modo WGC (MediaRecorder no renderer)
+let wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null }
+
+async function convertWebmToMp4(webmPath, mp4Path) {
+  const enc = detectedEncoder || 'libx264'
+  const encArgs = (enc.includes('qsv') || enc.includes('amf') || enc.includes('nvenc'))
+    ? ['-c:v', enc, '-b:v', '20M']
+    : ['-c:v', 'libx264', '-preset', 'fast', '-crf', '23']
+  const args = ['-i', webmPath, ...encArgs, '-an', '-y', mp4Path]
+  console.log('[WGC→MP4] Args:', args.join(' '))
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, args, { windowsHide: true })
+    proc.stderr.on('data', d => process.stdout.write('[WGC→MP4] ' + d))
+    proc.on('close', code => code === 0 ? resolve() : reject(new Error(`code ${code}`)))
+    proc.on('error', reject)
+  })
+}
+
+// Desabilita WGC apenas para captura de TELAS (causa E_INVALIDARG em dual-monitor).
+// WebRtcAllowWgcWindowCapturer permanece ATIVO — necessario para o modo de gravacao WGC
+// que usa getUserMedia no renderer para isolar janelas individualmente.
+app.commandLine.appendSwitch(
+  'disable-features',
+  'WindowsGraphicsCapture,WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcDesktopCapturer'
+)
 
 let mainWindow = null
 let tray = null
@@ -60,14 +89,17 @@ function makeTrayIcon(recording) {
   return nativeImage.createFromBuffer(buf, { width: size, height: size })
 }
 
+function isAnyRecording() { return recorder.isRecording || wgcState.active }
+
 function updateTray() {
   if (!tray) return
-  tray.setImage(makeTrayIcon(recorder.isRecording))
-  tray.setToolTip(recorder.isRecording ? 'Garo — Gravando...' : 'Garo Producoes')
+  const rec = isAnyRecording()
+  tray.setImage(makeTrayIcon(rec))
+  tray.setToolTip(rec ? 'Garo — Gravando...' : 'Garo Producoes')
   tray.setContextMenu(Menu.buildFromTemplate([
     {
-      label: recorder.isRecording ? 'Parar gravacao  (F10)' : 'Iniciar gravacao  (F9)',
-      click: () => recorder.isRecording ? handleStop() : handleStart()
+      label: isAnyRecording() ? 'Parar gravacao  (F10)' : 'Iniciar gravacao  (F9)',
+      click: () => isAnyRecording() ? handleStop() : handleStart()
     },
     { type: 'separator' },
     { label: 'Abrir painel', click: () => mainWindow && mainWindow.show() },
@@ -88,96 +120,114 @@ function encodePsCommand(script) {
   return Buffer.from(script, 'utf16le').toString('base64')
 }
 
-// Obtem bounds reais de uma janela via HWND (preferido) ou titulo parcial
+// Obtem bounds reais de uma janela.
+// Estrategia: 1) HWND do source ID (rapido)  2) Get-Process pelo titulo (fallback robusto)
+// Saida PS: linha1="x,y,w,h"  linha2="titulo atual da janela"
 function getWindowBoundsAsync(sourceId, windowTitle) {
-  const hwnd = hwndFromSourceId(sourceId)
+  const hwnd    = hwndFromSourceId(sourceId) || '0'
+  const safeName = (windowTitle || '').replace(/'/g, "''")
 
-  let script
-  if (hwnd) {
-    // Metodo confiavel: usa o HWND do source ID diretamente
-    // GetAncestor(GA_ROOT=2) garante que pegamos a janela de nivel superior
-    // mesmo que o HWND seja de um child window (como Chrome_RenderWidgetHostHWND)
-    script = `
+  // Script unificado: tenta HWND, cai para Get-Process se HWND estiver invalido
+  const script = `
 try {
   Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public class GWR {
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+using System.Text;
+public class WBND {
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint f);
-    public struct RECT { public int L, T, R, B; }
-}
-'@ -Language CSharp -ErrorAction SilentlyContinue
-  $h = [System.IntPtr][long]${hwnd}
-  if ([GWR]::IsWindow($h)) {
-    $root = [GWR]::GetAncestor($h, 2)
-    if ($root -ne [IntPtr]::Zero) { $h = $root }
-    $r = New-Object GWR+RECT
-    [GWR]::GetWindowRect($h, [ref]$r) | Out-Null
-    Write-Output "$($r.L),$($r.T),$($r.R-$r.L),$($r.B-$r.T)"
-  } else {
-    Write-Output "0,0,0,0"
-  }
-} catch {
-  Write-Output "0,0,0,0"
-}`
-  } else {
-    // Fallback: busca janela visivel com titulo contendo o texto
-    const safeName = (windowTitle || '').replace(/'/g, "''")
-    script = `
-try {
-  Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class GWE {
-    public delegate bool EWP(IntPtr h, IntPtr l);
-    [DllImport("user32.dll")] public static extern bool EnumWindows(EWP p, IntPtr l);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
-    [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
-    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT pv, int cb);
+    [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
     public struct RECT { public int L, T, R, B; }
 }
 '@ -Language CSharp -ErrorAction SilentlyContinue
-  $search = '${safeName}'
-  $found = [IntPtr]::Zero
-  [GWE]::EnumWindows({
-    param($h, $l)
-    if (-not [GWE]::IsWindowVisible($h)) { return $true }
+
+  $target = [IntPtr]::Zero
+
+  $hval = [long]'${hwnd}'
+  if ($hval -ne 0) {
+    $h = [IntPtr]$hval
+    if ([WBND]::IsWindow($h)) { $target = $h }
+  }
+
+  if ($target -eq [IntPtr]::Zero -and '${safeName}' -ne '') {
+    $proc = Get-Process -ErrorAction SilentlyContinue |
+      Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like '*${safeName}*' } |
+      Select-Object -First 1
+    if ($proc) { $target = [IntPtr]$proc.MainWindowHandle }
+  }
+
+  if ($target -ne [IntPtr]::Zero) {
+    $root = [WBND]::GetAncestor($target, 2)
+    if ($root -ne [IntPtr]::Zero) { $target = $root }
+    $r = New-Object WBND+RECT
+    $sz = [System.Runtime.InteropServices.Marshal]::SizeOf($r)
+    if ([WBND]::DwmGetWindowAttribute($target, 9, [ref]$r, $sz) -ne 0) {
+      [WBND]::GetWindowRect($target, [ref]$r) | Out-Null
+    }
     $sb = New-Object System.Text.StringBuilder(512)
-    [GWE]::GetWindowText($h, $sb, 512) | Out-Null
-    if ($sb.ToString().Contains($search)) { $script:found = $h; return $false }
-    return $true
-  }, [IntPtr]::Zero) | Out-Null
-  if ($found -eq [IntPtr]::Zero) {
-    Write-Output "0,0,0,0"
-  } else {
-    $r = New-Object GWE+RECT
-    [GWE]::GetWindowRect($found, [ref]$r) | Out-Null
+    [WBND]::GetWindowText($target, $sb, 512) | Out-Null
     Write-Output "$($r.L),$($r.T),$($r.R-$r.L),$($r.B-$r.T)"
+    Write-Output $sb.ToString()
+  } else {
+    Write-Output "0,0,0,0"
+    Write-Output ""
   }
 } catch {
   Write-Output "0,0,0,0"
+  Write-Output ""
 }`
-  }
 
   return new Promise((resolve) => {
     const encoded = encodePsCommand(script)
     execFile('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-      { windowsHide: true, timeout: 6000 },
+      { windowsHide: true, timeout: 8000 },
       (err, stdout, stderr) => {
         const raw = stdout.trim()
-        console.log('[Garo] PS bounds:', raw || '(vazio)', err ? `| err: ${err.code}` : '')
+        console.log('[Garo] PS bounds raw:', raw || '(vazio)', err ? `| err: ${err.code}` : '')
         if (err && !raw) { resolve(null); return }
-        const parts = raw.split(',').map(n => parseInt(n, 10))
+        const lines = raw.split('\n').map(l => l.trim()).filter(Boolean)
+        const parts = (lines[0] || '').split(',').map(n => parseInt(n, 10))
+        const title = lines[1] || ''
         if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-          resolve({ x: parts[0], y: parts[1], width: parts[2], height: parts[3] })
+          console.log('[Garo] Titulo da janela:', title || '(sem titulo)')
+          resolve({ x: parts[0], y: parts[1], width: parts[2], height: parts[3], title })
         } else {
           resolve(null)
         }
       }
     )
   })
+}
+
+// Retorna bounds do virtual desktop em pixels fisicos
+function getVirtualDesktopPhysical() {
+  const all = screen.getAllDisplays()
+  let minX = 0, minY = 0, maxX = 0, maxY = 0
+  for (const d of all) {
+    const sf = d.scaleFactor || 1
+    const l = Math.round(d.bounds.x * sf)
+    const t = Math.round(d.bounds.y * sf)
+    const r = Math.round((d.bounds.x + d.bounds.width)  * sf)
+    const b = Math.round((d.bounds.y + d.bounds.height) * sf)
+    if (l < minX) minX = l
+    if (t < minY) minY = t
+    if (r > maxX) maxX = r
+    if (b > maxY) maxY = b
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+}
+
+// Clipa physicalBounds para nao ultrapassar os limites do virtual desktop
+function clampToDesktop(pb) {
+  const vd = getVirtualDesktopPhysical()
+  const x = Math.max(pb.x, vd.x)
+  const y = Math.max(pb.y, vd.y)
+  const r = Math.min(pb.x + pb.width,  vd.x + vd.width)
+  const b = Math.min(pb.y + pb.height, vd.y + vd.height)
+  return { x, y, width: Math.max(2, r - x), height: Math.max(2, b - y) }
 }
 
 // Retorna bounds em pixels fisicos prontos para passar ao gdigrab
@@ -189,9 +239,27 @@ function getPrimaryBoundsPhysical() {
 
 async function handleStart() {
   const s = loadSettings()
-  const encoder = s.encoder === 'auto' ? detectedEncoder : s.encoder
   const outputPath = getOutputPath(s.outputFolder)
 
+  // Modo WGC: delega ao renderer (MediaRecorder + WGC do Chromium)
+  if (s.captureMode === 'wgc') {
+    const src = s.source || {}
+    const sourceId = src.id || ''
+    if (!sourceId) {
+      mainWindow && mainWindow.webContents.send('recording-error', {
+        message: 'WGC requer uma janela ou tela selecionada no seletor de fontes.'
+      })
+      return
+    }
+    const tempPath = outputPath.replace('.mp4', '_wgc.webm')
+    wgcState = { active: true, writeStream: null, tempPath, outputPath }
+    mainWindow && mainWindow.webContents.send('wgc-start', {
+      sourceId, outputPath, tempPath, bitrate: s.bitrate || 20,
+    })
+    return
+  }
+
+  const encoder = s.encoder === 'auto' ? detectedEncoder : s.encoder
   let source = s.source || { type: 'desktop', name: 'Tela inteira' }
 
   if (!source.type || source.type === 'desktop') {
@@ -219,7 +287,9 @@ async function handleStart() {
     const rawBounds = await getWindowBoundsAsync(source.id, source.name)
     if (rawBounds && rawBounds.width > 0) {
       console.log('[Garo] Bounds encontrados:', rawBounds)
-      source = { ...source, physicalBounds: rawBounds }
+      const clamped = clampToDesktop(rawBounds)
+      console.log('[Garo] Bounds ajustados:', clamped)
+      source = { ...source, physicalBounds: clamped, gdigrabTitle: rawBounds.title || null }
     } else {
       console.log('[Garo] Janela nao encontrada, usando monitor principal')
       source = { type: 'screen', name: 'Monitor principal', physicalBounds: getPrimaryBoundsPhysical() }
@@ -238,6 +308,10 @@ async function handleStart() {
 }
 
 function handleStop() {
+  if (wgcState.active) {
+    mainWindow && mainWindow.webContents.send('wgc-stop')
+    return
+  }
   recorder.stop()
 }
 
@@ -282,8 +356,8 @@ app.whenReady().then(() => {
   tray.on('click', () => mainWindow && (mainWindow.isVisible() ? mainWindow.focus() : mainWindow.show()))
   updateTray()
 
-  globalShortcut.register('F9',  () => { if (!recorder.isRecording) handleStart() })
-  globalShortcut.register('F10', () => { if (recorder.isRecording)  handleStop()  })
+  globalShortcut.register('F9',  () => { if (!isAnyRecording()) handleStart() })
+  globalShortcut.register('F10', () => { if (isAnyRecording())  handleStop()  })
 
   recorder.on('started',  ({ outputPath }) => {
     updateTray()
@@ -345,18 +419,26 @@ ipcMain.handle('open-file',   (_, p) => shell.openPath(p))
 ipcMain.handle('open-folder', (_, p) => shell.openPath(p))
 
 ipcMain.handle('get-sources', async () => {
-  const sources = await desktopCapturer.getSources({
-    types: ['screen', 'window'],
-    thumbnailSize: { width: 320, height: 180 },
-    fetchWindowIcons: false,
-  })
-  return sources.map(s => ({
+  let sources = []
+  try {
+    sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 320, height: 180 },
+      fetchWindowIcons: false,
+    })
+  } catch (e) {
+    console.error('[Garo] getSources falhou:', e.message)
+  }
+  const result = sources.map(s => ({
     id:         s.id,
     name:       s.name,
     type:       s.id.startsWith('screen:') ? 'screen' : 'window',
-    thumbnail:  s.thumbnail.toDataURL(),
+    thumbnail:  s.thumbnail && !s.thumbnail.isEmpty() ? s.thumbnail.toDataURL() : null,
     display_id: s.display_id,
   }))
+  console.log('[Garo] Fontes encontradas:', result.length,
+    '|', result.map(s => `${s.type}:${s.name}`).join(', '))
+  return result
 })
 
 ipcMain.handle('get-displays', () => {
@@ -366,6 +448,56 @@ ipcMain.handle('get-displays', () => {
     scaleFactor: d.scaleFactor,
     label:       d.label || `Monitor ${d.id}`,
   }))
+})
+
+// ── Handlers WGC (MediaRecorder no renderer → arquivo MP4 via FFmpeg) ──────────
+ipcMain.handle('wgc-start-write', async (_, tempPath) => {
+  try {
+    wgcState.writeStream = fs.createWriteStream(tempPath)
+    updateTray()
+    mainWindow && mainWindow.webContents.send('recording-started', { outputPath: wgcState.outputPath })
+    console.log('[WGC] Escrita iniciada:', tempPath)
+  } catch (e) {
+    console.error('[WGC] Erro ao abrir arquivo:', e.message)
+  }
+})
+
+ipcMain.handle('wgc-chunk', async (_, chunk) => {
+  if (wgcState.writeStream && chunk && chunk.length > 0) {
+    wgcState.writeStream.write(Buffer.from(chunk))
+  }
+})
+
+ipcMain.handle('wgc-finalize', async (_, outputPath) => {
+  console.log('[WGC] Finalizando...')
+  if (wgcState.writeStream) {
+    await new Promise(r => wgcState.writeStream.end(r))
+    wgcState.writeStream = null
+  }
+  try {
+    mainWindow && mainWindow.webContents.send('recording-warn', { message: 'Convertendo para MP4...' })
+    await convertWebmToMp4(wgcState.tempPath, outputPath)
+    try { fs.unlinkSync(wgcState.tempPath) } catch {}
+    console.log('[WGC] Convertido com sucesso:', outputPath)
+  } catch (e) {
+    console.error('[WGC→MP4] Erro:', e.message)
+    mainWindow && mainWindow.webContents.send('recording-error', { message: 'Conversão WGC falhou: ' + e.message })
+    wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null }
+    updateTray()
+    return
+  }
+  wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null }
+  updateTray()
+  mainWindow && mainWindow.webContents.send('recording-stopped', { outputPath, code: 0 })
+})
+
+ipcMain.handle('wgc-error', async (_, msg) => {
+  console.error('[WGC] Erro:', msg)
+  if (wgcState.writeStream) { try { wgcState.writeStream.end() } catch {} }
+  if (wgcState.tempPath) { try { fs.unlinkSync(wgcState.tempPath) } catch {} }
+  wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null }
+  updateTray()
+  mainWindow && mainWindow.webContents.send('recording-error', { message: 'WGC: ' + msg })
 })
 
 ipcMain.handle('get-recent', () => {
