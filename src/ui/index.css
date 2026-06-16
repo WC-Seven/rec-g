@@ -6,7 +6,10 @@ body {
   color: #e0e0f0;
   font-size: 13px;
   user-select: none;
-  overflow-x: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
 }
 
 .header {
@@ -176,7 +179,6 @@ input[type="range"] {
 
 .recent-list {
   padding: 4px 16px 12px;
-  max-height: 120px;
   overflow-y: auto;
 }
 .recent-list::-webkit-scrollbar { width: 4px; }
@@ -398,7 +400,7 @@ input[type="range"] {
 .nav-tab:hover  { color: #a0a0d0; }
 .nav-tab.active { color: #a0a0e0; border-bottom-color: #7070c0; }
 
-.tab-pane        { overflow-y: auto; max-height: 320px; }
+.tab-pane        { flex: 1; overflow-y: auto; min-height: 0; }
 .tab-pane.hidden { display: none; }
 
 /* ── Subseção dentro de aba ─────────────────────────────────── */
@@ -507,7 +509,7 @@ input[type="range"] {
   align-items: center;
   gap: 8px;
 }
-#tab-recent .recent-list { max-height: 260px; }
+#tab-recent .recent-list { /* cresce com a tab-pane */ }
 
 /* ── Toast ──────────────────────────────────────────────────── */
 .toast {

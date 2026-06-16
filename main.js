@@ -355,7 +355,10 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 480,
     height: 720,
-    resizable: false,
+    minWidth: 380,
+    minHeight: 500,
+    resizable: true,
+    maximizable: true,
     backgroundColor: '#0f0f1a',
     title: 'Garo Producoes',
     webPreferences: {
