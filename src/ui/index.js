@@ -323,7 +323,6 @@ garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate }) => {
     wgcRecorder.onstop = async () => {
       wgcStream && wgcStream.getTracks().forEach(t => t.stop())
       wgcStream = null
-      showToast('Finalizando gravação WGC...', 8000)
       await garo.wgcFinalize(outputPath)
     }
 
@@ -340,6 +339,8 @@ garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate }) => {
 
 garo.onWgcStop(() => {
   if (wgcRecorder && wgcRecorder.state !== 'inactive') {
+    setRecording(false)
+    showToast('Convertendo para MP4...', 30000)
     wgcRecorder.stop()
     wgcRecorder = null
   }
