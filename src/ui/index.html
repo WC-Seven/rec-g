@@ -18,109 +18,118 @@
     <div class="hotkeys">F9 iniciar &nbsp;•&nbsp; F10 parar</div>
   </div>
 
-  <div class="section-title">Configurações</div>
-  <div class="settings">
-
-    <div class="row">
-      <label title="Escolha qual tela ou janela será gravada.&#10;&#10;📺 Telas — grava um monitor inteiro&#10;🗔 Janelas — grava apenas um aplicativo">
-        Fonte <span class="hint">(?)</span>
-      </label>
-      <button id="btn-source" class="source-btn">🖥 Tela inteira</button>
-    </div>
-
-    <div class="row">
-      <label title="FFmpeg: melhor qualidade, hardware encoding (hevc_qsv/amf/nvenc). Captura a região da tela.&#10;&#10;WGC: captura somente a janela selecionada, sem outras janelas visíveis. Requer Windows 10 1903+.">
-        Modo <span class="hint">(?)</span>
-      </label>
-      <select id="capture-mode">
-        <option value="ffmpeg">FFmpeg — captura de tela inteira</option>
-        <option value="wgc">WGC — captura de janela</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label title="Tecnologia usada para comprimir o vídeo.&#10;&#10;AMF  → usa a GPU AMD (recomendado para AMD)&#10;NVENC → usa a GPU NVIDIA&#10;CPU  → mais lento, funciona em qualquer PC">
-        Encoder <span class="hint">(?)</span>
-      </label>
-      <select id="encoder">
-        <option value="auto">Auto detectar</option>
-        <option value="hevc_amf">H.265 / AMF (AMD)</option>
-        <option value="hevc_nvenc">H.265 / NVENC (NVIDIA)</option>
-        <option value="h264_amf">H.264 / AMF (AMD)</option>
-        <option value="h264_nvenc">H.264 / NVENC (NVIDIA)</option>
-        <option value="libx264">H.264 / CPU</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label title="Quadros por segundo gravados.&#10;&#10;Deve ser igual ao Hz do seu monitor.&#10;Monitor 60Hz  → use 60 fps&#10;Monitor 144Hz → use 144 fps&#10;&#10;Mais fps = arquivo maior.">
-        FPS <span class="hint">(?)</span>
-      </label>
-      <select id="fps">
-        <option value="30">30 fps</option>
-        <option value="60" selected>60 fps</option>
-        <option value="120">120 fps</option>
-        <option value="144">144 fps</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label title="Quantidade de dados por segundo no vídeo.&#10;Mais Mbps = melhor qualidade e arquivo maior.&#10;&#10;1080p → 40–60 Mbps&#10;1440p → 60–80 Mbps&#10;4K    → 80–150 Mbps">
-        Qualidade <span class="hint">(?)</span>
-      </label>
-      <div class="bitrate-row">
-        <input type="range" id="bitrate" min="10" max="200" step="5" value="80"
-               oninput="document.getElementById('bitrate-val').textContent = this.value + ' Mbps'">
-        <span id="bitrate-val">80 Mbps</span>
-      </div>
-    </div>
-
-    <div class="row">
-      <label title="Microfone para narração ou voz.&#10;Funciona nos modos FFmpeg e WGC.">
-        Microfone <span class="hint">(?)</span>
-      </label>
-      <select id="mic-device">
-        <option value="">Nenhum</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label title="Captura o som reproduzido no computador.&#10;Disponível apenas no modo FFmpeg.&#10;Requer 'Stereo Mix' habilitado nas configurações de som do Windows.">
-        Áudio sistema <span class="hint">(?)</span>
-      </label>
-      <select id="sys-audio-device">
-        <option value="">Nenhum</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label title="Câmera detectada no sistema.&#10;Gravação com webcam em desenvolvimento.">
-        Webcam <span class="hint">(?)</span>
-      </label>
-      <select id="webcam-device">
-        <option value="">Nenhuma</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label title="Pasta onde os vídeos serão salvos.&#10;&#10;Clique no campo ou nos '...' para escolher.&#10;Os arquivos são nomeados com data e hora.">
-        Pasta de saída <span class="hint">(?)</span>
-      </label>
-      <div class="folder-row">
-        <input type="text" id="output-folder" readonly placeholder="Selecione uma pasta..."
-               onclick="window._abrirPasta()">
-        <button id="btn-folder" onclick="window._abrirPasta()">...</button>
-      </div>
-    </div>
-
+  <!-- Navegação por abas -->
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-tab="gravar">Gravar</button>
+    <button class="nav-tab" data-tab="audio-cam">Áudio &amp; Câmera</button>
+    <button class="nav-tab" data-tab="config">Configurações</button>
+    <button class="nav-tab" data-tab="recent">Gravações</button>
   </div>
 
-  <div class="section-title">
-    Gravações recentes
-    <button id="btn-refresh" class="btn-sm" title="Atualizar lista">↻</button>
+  <!-- Aba: Gravar -->
+  <div class="tab-pane" id="tab-gravar">
+    <div class="settings">
+      <div class="row">
+        <label title="Escolha qual tela ou janela será gravada.&#10;&#10;📺 Telas — grava um monitor inteiro&#10;🗔 Janelas — grava apenas um aplicativo">
+          Fonte <span class="hint">(?)</span>
+        </label>
+        <button id="btn-source" class="source-btn">🖥 Tela inteira</button>
+      </div>
+      <div class="row">
+        <label title="FFmpeg: melhor qualidade, hardware encoding (hevc_qsv/amf/nvenc). Captura a região da tela.&#10;&#10;WGC: captura somente a janela selecionada, sem outras janelas visíveis. Requer Windows 10 1903+.">
+          Modo <span class="hint">(?)</span>
+        </label>
+        <select id="capture-mode">
+          <option value="ffmpeg">FFmpeg — captura de tela inteira</option>
+          <option value="wgc">WGC — captura de janela</option>
+        </select>
+      </div>
+    </div>
   </div>
-  <div id="recent-list" class="recent-list">
-    <div class="empty">Nenhuma gravação ainda</div>
+
+  <!-- Aba: Áudio & Câmera -->
+  <div class="tab-pane hidden" id="tab-audio-cam">
+    <div class="settings">
+      <div class="subsection-title">Áudio</div>
+      <div class="row">
+        <label title="Microfone para narração ou voz.&#10;Funciona nos modos FFmpeg e WGC.">
+          Microfone <span class="hint">(?)</span>
+        </label>
+        <select id="mic-device"><option value="">Nenhum</option></select>
+      </div>
+      <div class="row">
+        <label title="Captura o som reproduzido no computador.&#10;Disponível apenas no modo FFmpeg.&#10;Requer 'Stereo Mix' habilitado nas configurações de som do Windows.">
+          Áudio sistema <span class="hint">(?)</span>
+        </label>
+        <select id="sys-audio-device"><option value="">Nenhum</option></select>
+      </div>
+
+      <div class="subsection-title cam-title">Câmeras</div>
+      <div id="cameras-list">
+        <div class="empty cam-loading">Detectando câmeras...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Aba: Configurações -->
+  <div class="tab-pane hidden" id="tab-config">
+    <div class="settings">
+      <div class="row">
+        <label title="Tecnologia usada para comprimir o vídeo.&#10;&#10;QSV  → usa Intel Quick Sync&#10;AMF  → usa a GPU AMD&#10;NVENC → usa a GPU NVIDIA&#10;CPU  → mais lento, funciona em qualquer PC">
+          Encoder <span class="hint">(?)</span>
+        </label>
+        <select id="encoder">
+          <option value="auto">Auto detectar</option>
+          <option value="hevc_amf">H.265 / AMF (AMD)</option>
+          <option value="hevc_nvenc">H.265 / NVENC (NVIDIA)</option>
+          <option value="h264_amf">H.264 / AMF (AMD)</option>
+          <option value="h264_nvenc">H.264 / NVENC (NVIDIA)</option>
+          <option value="libx264">H.264 / CPU</option>
+        </select>
+      </div>
+      <div class="row">
+        <label title="Quadros por segundo gravados.&#10;&#10;Deve ser igual ao Hz do seu monitor.&#10;Monitor 60Hz  → use 60 fps&#10;Monitor 144Hz → use 144 fps&#10;&#10;Mais fps = arquivo maior.">
+          FPS <span class="hint">(?)</span>
+        </label>
+        <select id="fps">
+          <option value="30">30 fps</option>
+          <option value="60" selected>60 fps</option>
+          <option value="120">120 fps</option>
+          <option value="144">144 fps</option>
+        </select>
+      </div>
+      <div class="row">
+        <label title="Quantidade de dados por segundo no vídeo.&#10;Mais Mbps = melhor qualidade e arquivo maior.&#10;&#10;1080p → 40–60 Mbps&#10;1440p → 60–80 Mbps&#10;4K    → 80–150 Mbps">
+          Qualidade <span class="hint">(?)</span>
+        </label>
+        <div class="bitrate-row">
+          <input type="range" id="bitrate" min="10" max="200" step="5" value="80"
+                 oninput="document.getElementById('bitrate-val').textContent = this.value + ' Mbps'">
+          <span id="bitrate-val">80 Mbps</span>
+        </div>
+      </div>
+      <div class="row">
+        <label title="Pasta onde os vídeos serão salvos.&#10;&#10;Clique no campo ou nos '...' para escolher.&#10;Os arquivos são nomeados com data e hora.">
+          Pasta de saída <span class="hint">(?)</span>
+        </label>
+        <div class="folder-row">
+          <input type="text" id="output-folder" readonly placeholder="Selecione uma pasta..."
+                 onclick="window._abrirPasta()">
+          <button id="btn-folder" onclick="window._abrirPasta()">...</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Aba: Gravações -->
+  <div class="tab-pane hidden" id="tab-recent">
+    <div class="recent-tab-header">
+      Gravações recentes
+      <button id="btn-refresh" class="btn-sm" title="Atualizar lista">↻</button>
+    </div>
+    <div id="recent-list" class="recent-list">
+      <div class="empty">Nenhuma gravação ainda</div>
+    </div>
   </div>
 
   <!-- Modal seletor de fonte -->

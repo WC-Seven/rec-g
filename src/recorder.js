@@ -90,25 +90,90 @@ class Recorder extends EventEmitter {
     return args
   }
 
+  _camOverlayExpr(position) {
+    switch (position) {
+      case 'tl':   return '20:20'
+      case 'tr':   return 'W-overlay_w-20:20'
+      case 'bl':   return '20:H-overlay_h-20'
+      default:     return 'W-overlay_w-20:H-overlay_h-20'  // br
+    }
+  }
+
   _buildArgs(settings, encoder) {
-    const { outputPath, fps, bitrate, source, micDevice, sysAudioDevice } = settings
+    const { outputPath, fps, bitrate, source, micDevice, sysAudioDevice, cameras } = settings
     const hasMic = !!(micDevice && micDevice !== '')
     const hasSys = !!(sysAudioDevice && sysAudioDevice !== '')
     const VF = 'scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p'
 
+    // Primeira câmera habilitada para overlay (FFmpeg mode)
+    const enabledCams = (cameras || []).filter(c => c.enabled && c.name)
+    const firstCam    = enabledCams[0] || null
+
     const videoIn = this._buildVideoArgs(fps, source)
     const encArgs = this._buildEncoderArgs(encoder, bitrate)
 
-    if (hasMic && hasSys) {
+    // Quantas entradas de audio existem (indice base = 1 se hasCam, senão 1)
+    const hasCam   = !!firstCam
+    const camInput = hasCam
+      ? ['-f', 'dshow', '-i', `video=${firstCam.name}`]
+      : []
+
+    // Indices: 0=screen, 1=cam(se houver), seguintes=audio
+    const camIdx  = 1
+    const micIdx  = hasCam ? 2 : 1
+    const sysIdx  = hasCam ? (hasMic ? 3 : 2) : (hasMic ? 2 : -1)
+
+    const audioInputs = []
+    if (hasMic) audioInputs.push('-f', 'dshow', '-i', `audio=${micDevice}`)
+    if (hasSys) audioInputs.push('-f', 'dshow', '-i', `audio=${sysAudioDevice}`)
+
+    const hasAudio = hasMic || hasSys
+    const audioEncArgs = hasAudio ? ['-c:a', 'aac', '-b:a', '192k'] : ['-an']
+
+    if (hasCam) {
+      // Monta filter_complex com overlay de câmera + audio mix se necessário
+      const overlayExpr = firstCam.position === 'full'
+        ? '0:0'
+        : this._camOverlayExpr(firstCam.position || 'br')
+
+      const camScale = firstCam.position === 'full'
+        ? `[${camIdx}:v]scale=iw:ih[cam]`
+        : `[${camIdx}:v]scale=480:270[cam]`
+
+      let fc = `[0:v]${VF}[bg];${camScale};[bg][cam]overlay=${overlayExpr}[vout]`
+
+      const audioInputCount = (hasMic ? 1 : 0) + (hasSys ? 1 : 0)
+      if (audioInputCount === 2) {
+        fc += `;[${micIdx}:a][${sysIdx}:a]amix=inputs=2:duration=first[aout]`
+        return [
+          ...videoIn, ...camInput, ...audioInputs,
+          '-filter_complex', fc,
+          '-map', '[vout]', '-map', '[aout]',
+          ...encArgs, ...audioEncArgs, '-y', outputPath,
+        ]
+      } else if (audioInputCount === 1) {
+        const aIdx = hasMic ? micIdx : sysIdx
+        fc += `;[${aIdx}:a]acopy[aout]`
+        return [
+          ...videoIn, ...camInput, ...audioInputs,
+          '-filter_complex', fc,
+          '-map', '[vout]', '-map', '[aout]',
+          ...encArgs, ...audioEncArgs, '-y', outputPath,
+        ]
+      } else {
+        return [
+          ...videoIn, ...camInput,
+          '-filter_complex', fc,
+          '-map', '[vout]',
+          ...encArgs, '-an', '-y', outputPath,
+        ]
+      }
+    } else if (hasMic && hasSys) {
       return [
-        ...videoIn,
-        '-f', 'dshow', '-i', `audio=${micDevice}`,
-        '-f', 'dshow', '-i', `audio=${sysAudioDevice}`,
+        ...videoIn, ...audioInputs,
         '-filter_complex', `[0:v]${VF}[vout];[1:a][2:a]amix=inputs=2:duration=first[aout]`,
         '-map', '[vout]', '-map', '[aout]',
-        ...encArgs,
-        '-c:a', 'aac', '-b:a', '192k',
-        '-y', outputPath,
+        ...encArgs, '-c:a', 'aac', '-b:a', '192k', '-y', outputPath,
       ]
     } else if (hasMic || hasSys) {
       const audioName = hasMic ? micDevice : sysAudioDevice
@@ -116,17 +181,13 @@ class Recorder extends EventEmitter {
         ...videoIn,
         '-f', 'dshow', '-i', `audio=${audioName}`,
         '-vf', VF,
-        ...encArgs,
-        '-c:a', 'aac', '-b:a', '192k',
-        '-y', outputPath,
+        ...encArgs, '-c:a', 'aac', '-b:a', '192k', '-y', outputPath,
       ]
     } else {
       return [
         ...videoIn,
         '-vf', VF,
-        ...encArgs,
-        '-an',
-        '-y', outputPath,
+        ...encArgs, '-an', '-y', outputPath,
       ]
     }
   }

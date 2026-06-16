@@ -258,6 +258,7 @@ async function handleStart() {
     mainWindow && mainWindow.webContents.send('wgc-start', {
       sourceId, outputPath, tempPath, bitrate: s.bitrate || 20,
       micDevice: s.micDevice || null,
+      cameras:   (s.cameras || []).filter(c => c.enabled),
     })
     return
   }
@@ -305,8 +306,9 @@ async function handleStart() {
     bitrate:         s.bitrate,
     encoder,
     fallbackEncoder: detectedEncoder,
-    micDevice:       s.micDevice       || null,
-    sysAudioDevice:  s.sysAudioDevice  || null,
+    micDevice:       s.micDevice      || null,
+    sysAudioDevice:  s.sysAudioDevice || null,
+    cameras:         s.cameras        || [],
     source,
   })
 }
