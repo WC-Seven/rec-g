@@ -397,8 +397,13 @@ app.whenReady().then(() => {
   tray.on('click', () => mainWindow && (mainWindow.isVisible() ? mainWindow.focus() : mainWindow.show()))
   updateTray()
 
-  globalShortcut.register('F9',  () => { if (!isAnyRecording()) handleStart() })
-  globalShortcut.register('F10', () => { if (isAnyRecording())  handleStop()  })
+  globalShortcut.register('F9',    () => { if (!isAnyRecording()) handleStart() })
+  globalShortcut.register('F10',   () => { if (isAnyRecording())  handleStop()  })
+  globalShortcut.register('Ctrl+Alt+G', () => {
+    if (!mainWindow) return
+    if (mainWindow.isVisible() && mainWindow.isFocused()) mainWindow.hide()
+    else { mainWindow.show(); mainWindow.focus() }
+  })
 
   recorder.on('started',  ({ outputPath }) => {
     updateTray()
