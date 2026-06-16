@@ -1,7 +1,7 @@
 {
-  "name": "garo",
+  "name": "REC-G",
   "version": "1.0.0",
-  "description": "Gravador de tela com encoding por hardware AMD/NVIDIA",
+  "description": "Gravador de tela e janelas com encoding por hardware AMD/NVIDIA",
   "main": "main.js",
   "author": "Wellington Monteiro <wellington.monteiro@dayonesystem.com.br>",
   "scripts": {

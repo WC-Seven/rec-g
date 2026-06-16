@@ -18,6 +18,15 @@
     <div class="hotkeys">F9 iniciar &nbsp;•&nbsp; F10 parar</div>
   </div>
 
+  <!-- Log de ações -->
+  <div class="action-log-wrap">
+    <div class="action-log-header">
+      <span>LOG</span>
+      <button id="btn-clear-log" title="Limpar log">✕</button>
+    </div>
+    <div id="action-log" class="action-log"></div>
+  </div>
+
   <!-- Navegação por abas -->
   <div class="nav-tabs">
     <button class="nav-tab active" data-tab="gravar">Gravar</button>
@@ -107,6 +116,19 @@
                  oninput="document.getElementById('bitrate-val').textContent = this.value + ' Mbps'">
           <span id="bitrate-val">80 Mbps</span>
         </div>
+      </div>
+      <div class="row">
+        <label title="Divide a gravação em segmentos do tempo escolhido.&#10;Ao atingir o limite, salva o arquivo e inicia um novo automaticamente.&#10;&#10;Útil para gravações longas: arquivos menores são mais&#10;fáceis de converter e editar.">
+          Corte automático <span class="hint">(?)</span>
+        </label>
+        <select id="split-interval">
+          <option value="0">Sem corte</option>
+          <option value="300">5 minutos</option>
+          <option value="600">10 minutos</option>
+          <option value="1200" selected>20 minutos</option>
+          <option value="1800">30 minutos</option>
+          <option value="3600">1 hora</option>
+        </select>
       </div>
       <div class="row">
         <label title="Pasta onde os vídeos serão salvos.&#10;&#10;Clique no campo ou nos '...' para escolher.&#10;Os arquivos são nomeados com data e hora.">

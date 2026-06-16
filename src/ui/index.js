@@ -38,13 +38,39 @@ function setRecording(val) {
   }
 }
 
-function showToast(msg, duration = 3000) {
+// type: 'info' | 'ok' | 'warn' | 'error' | 'split'
+function showToast(msg, duration = 3000, type = 'info') {
   const toast = document.getElementById('toast')
   toast.textContent = msg
-  toast.classList.remove('hidden')
+  toast.className = `toast ${type}`
   clearTimeout(toast._t)
   toast._t = setTimeout(() => toast.classList.add('hidden'), duration)
 }
+
+const LOG_DOTS = { ok: '●', warn: '▲', error: '✕', split: '↺', info: '›' }
+
+function addLog(msg, type = 'info', toastDuration = 3000) {
+  showToast(msg, toastDuration, type)
+
+  const logEl = document.getElementById('action-log')
+  if (!logEl) return
+  const now = new Date()
+  const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  const entry = document.createElement('div')
+  entry.className = `log-entry ${type}`
+  entry.innerHTML =
+    `<span class="log-time">${ts}</span>` +
+    `<span class="log-dot">${LOG_DOTS[type] || '›'}</span>` +
+    `<span class="log-msg">${msg}</span>`
+  logEl.appendChild(entry)
+  while (logEl.children.length > 80) logEl.removeChild(logEl.firstChild)
+  logEl.scrollTop = logEl.scrollHeight
+}
+
+document.getElementById('btn-clear-log').addEventListener('click', () => {
+  const logEl = document.getElementById('action-log')
+  if (logEl) logEl.innerHTML = ''
+})
 
 // ── Navegação por abas ─────────────────────────────────────────
 document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -89,9 +115,10 @@ function markRecommended(selectId, recommendedValue) {
 
 // ── Configurações ──────────────────────────────────────────────
 function applySettings(s) {
-  document.getElementById('encoder').value       = s.encoder      || 'auto'
-  document.getElementById('fps').value           = String(s.fps   || 60)
-  document.getElementById('capture-mode').value  = s.captureMode  || 'ffmpeg'
+  document.getElementById('encoder').value        = s.encoder      || 'auto'
+  document.getElementById('fps').value            = String(s.fps   || 60)
+  document.getElementById('capture-mode').value   = s.captureMode  || 'ffmpeg'
+  document.getElementById('split-interval').value = String(s.splitInterval !== undefined ? s.splitInterval : 1200)
   bitrateSlider.value = s.bitrate || 80
   bitrateVal.textContent = (s.bitrate || 80) + ' Mbps'
   document.getElementById('output-folder').value = s.outputFolder || ''
@@ -108,6 +135,7 @@ async function collectSettings() {
     fps:            parseInt(document.getElementById('fps').value),
     bitrate:        parseInt(bitrateSlider.value),
     captureMode:    document.getElementById('capture-mode').value,
+    splitInterval:  parseInt(document.getElementById('split-interval')?.value) || 0,
     outputFolder:   document.getElementById('output-folder').value,
     micDevice:      document.getElementById('mic-device')?.value       || '',
     sysAudioDevice: document.getElementById('sys-audio-device')?.value || '',
@@ -140,6 +168,7 @@ function applyRecommendations(detectedEncoder, monitorHz) {
 document.getElementById('encoder').addEventListener('change', autoSave)
 document.getElementById('fps').addEventListener('change', autoSave)
 document.getElementById('capture-mode').addEventListener('change', autoSave)
+document.getElementById('split-interval').addEventListener('change', autoSave)
 document.getElementById('mic-device').addEventListener('change', autoSave)
 document.getElementById('sys-audio-device').addEventListener('change', autoSave)
 bitrateSlider.addEventListener('change', autoSave)
@@ -212,6 +241,11 @@ function renderCameraList(cams, savedCameras) {
 
 // ── Detecção de dispositivos ───────────────────────────────────
 async function loadMediaDevices() {
+  if (!navigator.mediaDevices) {
+    renderCameraList([], [])
+    return
+  }
+
   // Solicita permissão de microfone para obter labels
   try {
     const s = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -269,13 +303,19 @@ async function loadMediaDevices() {
       return { label: name, deviceId: match ? match.deviceId : null }
     })
 
-    // Fallback: se DirectShow não devolveu câmeras, usa browser API
+    // Fallback: se DirectShow não devolveu câmeras, usa browser API com sufixo USB removido
     if (dshowCamList.length === 0) {
-      dshowCamList = cams.map(d => ({ label: d.label, deviceId: d.deviceId }))
+      dshowCamList = cams.map(d => ({
+        label: d.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, '').trim(),
+        deviceId: d.deviceId,
+      }))
     }
   } catch (e) {
     console.warn('[Devices] getDshowDevices falhou:', e.message)
-    dshowCamList = cams.map(d => ({ label: d.label, deviceId: d.deviceId }))
+    dshowCamList = cams.map(d => ({
+      label: d.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, '').trim(),
+      deviceId: d.deviceId,
+    }))
   }
 
   // Câmeras + restore de seleções salvas
@@ -403,23 +443,23 @@ document.getElementById('btn-source-confirm').addEventListener('click', async ()
   const s = await collectSettings()
   s.source = sourceSettings
   await garo.saveSettings(s)
-  showToast('Fonte selecionada: ' + selectedSource.name)
+  addLog('Fonte: ' + selectedSource.name, 'info')
 })
 
 // ── Pasta de saída ─────────────────────────────────────────────
 window._abrirPasta = async function () {
-  showToast('Abrindo seletor de pasta...')
+  showToast('Abrindo seletor...', 2000, 'info')
   try {
     const folder = await garo.selectFolder()
     if (folder) {
       document.getElementById('output-folder').value = folder
       autoSave()
-      showToast('Pasta salva!')
+      addLog('Pasta de saída salva', 'ok')
     } else {
-      showToast('Nenhuma pasta selecionada.')
+      showToast('Nenhuma pasta selecionada.', 2000, 'info')
     }
   } catch (e) {
-    showToast('Erro: ' + e.message)
+    addLog('Erro ao selecionar pasta: ' + e.message, 'error')
   }
 }
 
@@ -430,8 +470,10 @@ let wgcRecorder  = null
 let wgcStream    = null
 let wgcAnimFrame = null
 let wgcCamStreams = []
+let wgcCurrentSegment = 1
 
-garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate, micDevice, cameras }) => {
+garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate, micDevice, cameras, segment = 1 }) => {
+  wgcCurrentSegment = segment
   let micStream = null
   try {
     // Stream de tela via WGC
@@ -449,7 +491,7 @@ garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate, micDevice, cam
         micStream = await navigator.mediaDevices.getUserMedia({ audio: constraint, video: false })
       } catch (e) {
         console.warn('[WGC] Mic:', e.message)
-        showToast('Microfone indisponivel, gravando sem audio', 4000)
+        addLog('Microfone indisponível — gravando sem áudio', 'warn', 5000)
       }
     }
 
@@ -590,29 +632,37 @@ garo.onWgcStop(() => {
   if (wgcAnimFrame) { cancelAnimationFrame(wgcAnimFrame); wgcAnimFrame = null }
   if (wgcRecorder && wgcRecorder.state !== 'inactive') {
     setRecording(false)
-    showToast('Convertendo para MP4...', 30000)
+    addLog(`Convertendo segmento ${wgcCurrentSegment} para MP4...`, 'warn', 30000)
     wgcRecorder.stop()
     wgcRecorder = null
   }
 })
 
 // ── Eventos de gravação ────────────────────────────────────────
-garo.onRecordingStarted(() => {
+garo.onRecordingStarted((data = {}) => {
   setRecording(true)
-  showToast('Gravação iniciada')
+  if (data.segment && data.segment > 1) {
+    addLog(`Gravando segmento ${data.segment}`, 'split')
+  } else {
+    addLog('Gravação iniciada', 'ok')
+  }
 })
 
-garo.onRecordingStopped(async () => {
-  setRecording(false)
-  showToast('Gravação salva!')
+garo.onRecordingStopped(async (data = {}) => {
+  if (!data.autoRestart) {
+    setRecording(false)
+    addLog('Gravação salva', 'ok')
+  } else {
+    addLog('Segmento salvo — reiniciando...', 'split', 5000)
+  }
   await loadRecent()
 })
 
 garo.onRecordingError(({ message }) => {
   setRecording(false)
-  showToast('Erro: ' + message, 6000)
+  addLog('Erro: ' + message, 'error', 8000)
 })
 
 garo.onRecordingWarn(({ message }) => {
-  showToast('⚠ ' + message, 4000)
+  addLog(message, 'warn', 4000)
 })

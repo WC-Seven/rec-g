@@ -11,6 +11,27 @@ try { ffmpegPath = require('ffmpeg-static') } catch { ffmpegPath = 'ffmpeg' }
 // Estado do modo WGC (MediaRecorder no renderer)
 let wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null, hasAudio: false }
 
+// Auto-split de gravação
+let splitTimer         = null
+let segmentCount       = 0
+let pendingAutoRestart = false
+
+function startSplitTimer(intervalSec) {
+  clearTimeout(splitTimer)
+  splitTimer = null
+  if (!intervalSec || intervalSec <= 0) return
+  splitTimer = setTimeout(() => {
+    if (app.isQuitting) return
+    console.log('[Split] Corte automatico, encerrando segmento', segmentCount)
+    handleStop(true)
+  }, intervalSec * 1000)
+}
+
+function stopSplitTimer() {
+  clearTimeout(splitTimer)
+  splitTimer = null
+}
+
 async function convertWebmToMp4(webmPath, mp4Path, hasAudio = false) {
   const enc = detectedEncoder || 'libx264'
   const encArgs = (enc.includes('qsv') || enc.includes('amf') || enc.includes('nvenc'))
@@ -238,15 +259,21 @@ function getPrimaryBoundsPhysical() {
   return { x: 0, y: 0, width: Math.round(d.bounds.width * sf), height: Math.round(d.bounds.height * sf) }
 }
 
-async function handleStart() {
+async function handleStart(fromAutoRestart = false) {
+  if (fromAutoRestart) segmentCount++
+  else segmentCount = 1
+
   const s = loadSettings()
   const outputPath = getOutputPath(s.outputFolder)
+  const splitInterval = parseInt(s.splitInterval) || 0
+  startSplitTimer(splitInterval)
 
   // Modo WGC: delega ao renderer (MediaRecorder + WGC do Chromium)
   if (s.captureMode === 'wgc') {
     const src = s.source || {}
     const sourceId = src.id || ''
     if (!sourceId) {
+      stopSplitTimer()
       mainWindow && mainWindow.webContents.send('recording-error', {
         message: 'WGC requer uma janela ou tela selecionada no seletor de fontes.'
       })
@@ -259,6 +286,7 @@ async function handleStart() {
       sourceId, outputPath, tempPath, bitrate: s.bitrate || 20,
       micDevice: s.micDevice || null,
       cameras:   (s.cameras || []).filter(c => c.enabled),
+      segment:   segmentCount,
     })
     return
   }
@@ -313,7 +341,9 @@ async function handleStart() {
   })
 }
 
-function handleStop() {
+function handleStop(autoRestart = false) {
+  stopSplitTimer()
+  pendingAutoRestart = autoRestart
   if (wgcState.active) {
     mainWindow && mainWindow.webContents.send('wgc-stop')
     return
@@ -372,16 +402,21 @@ app.whenReady().then(() => {
 
   recorder.on('started',  ({ outputPath }) => {
     updateTray()
-    mainWindow && mainWindow.webContents.send('recording-started', { outputPath })
+    mainWindow && mainWindow.webContents.send('recording-started', { outputPath, segment: segmentCount })
   })
   recorder.on('stopped',  ({ outputPath, code }) => {
     updateTray()
-    mainWindow && mainWindow.webContents.send('recording-stopped', { outputPath, code })
+    const restart = pendingAutoRestart
+    pendingAutoRestart = false
+    mainWindow && mainWindow.webContents.send('recording-stopped', { outputPath, code, autoRestart: restart })
+    if (restart && !app.isQuitting) setTimeout(() => handleStart(true), 300)
   })
   recorder.on('progress', (data) => {
     mainWindow && mainWindow.webContents.send('recording-progress', data)
   })
   recorder.on('error',    (err) => {
+    stopSplitTimer()
+    pendingAutoRestart = false
     updateTray()
     mainWindow && mainWindow.webContents.send('recording-error', { message: err.message })
   })
@@ -466,7 +501,7 @@ ipcMain.handle('wgc-start-write', async (_, tempPath) => {
   try {
     wgcState.writeStream = fs.createWriteStream(tempPath)
     updateTray()
-    mainWindow && mainWindow.webContents.send('recording-started', { outputPath: wgcState.outputPath })
+    mainWindow && mainWindow.webContents.send('recording-started', { outputPath: wgcState.outputPath, segment: segmentCount })
     console.log('[WGC] Escrita iniciada:', tempPath)
   } catch (e) {
     console.error('[WGC] Erro ao abrir arquivo:', e.message)
@@ -499,11 +534,16 @@ ipcMain.handle('wgc-finalize', async (_, outputPath) => {
   }
   wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null }
   updateTray()
-  mainWindow && mainWindow.webContents.send('recording-stopped', { outputPath, code: 0 })
+  const restart = pendingAutoRestart
+  pendingAutoRestart = false
+  mainWindow && mainWindow.webContents.send('recording-stopped', { outputPath, code: 0, autoRestart: restart })
+  if (restart && !app.isQuitting) setTimeout(() => handleStart(true), 300)
 })
 
 ipcMain.handle('wgc-error', async (_, msg) => {
   console.error('[WGC] Erro:', msg)
+  stopSplitTimer()
+  pendingAutoRestart = false
   if (wgcState.writeStream) { try { wgcState.writeStream.end() } catch {} }
   if (wgcState.tempPath) { try { fs.unlinkSync(wgcState.tempPath) } catch {} }
   wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null }
