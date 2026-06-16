@@ -148,6 +148,7 @@ bitrateSlider.addEventListener('change', autoSave)
 function collectCameraSettings() {
   return Array.from(document.querySelectorAll('.camera-card')).map(card => ({
     name:     card.dataset.camName,
+    deviceId: card.dataset.camId || null,
     enabled:  card.querySelector('.cam-toggle').checked,
     position: card.querySelector('.pos-q.active, .pos-btn-full.active')?.dataset.pos || 'br',
   }))
@@ -172,8 +173,9 @@ function renderCameraList(cams, savedCameras) {
     const enabled = saved.enabled || false
     const pos     = saved.position || 'br'
     const safeName = (cam.label || '').replace(/"/g, '&quot;')
+    const safeDeviceId = (cam.deviceId || '').replace(/"/g, '&quot;')
     return `
-    <div class="camera-card" data-cam-name="${safeName}">
+    <div class="camera-card" data-cam-name="${safeName}" data-cam-id="${safeDeviceId}">
       <div class="camera-header">
         <input type="checkbox" id="cam-chk-${i}" class="cam-toggle"${enabled ? ' checked' : ''}>
         <label for="cam-chk-${i}" title="${safeName}">${cam.label || 'Câmera ' + (i + 1)}</label>
@@ -243,9 +245,11 @@ async function loadMediaDevices() {
     micSel.appendChild(opt)
   })
 
-  // Áudio do sistema via DirectShow
+  // Áudio do sistema + câmeras via DirectShow
+  let dshowCamList = []
   try {
     const dshow = await garo.getDshowDevices()
+
     const sysSel = document.getElementById('sys-audio-device')
     ;(dshow.audio || []).forEach(name => {
       const opt = document.createElement('option')
@@ -253,13 +257,30 @@ async function loadMediaDevices() {
       opt.textContent = name
       sysSel.appendChild(opt)
     })
+
+    // Câmeras: usa nomes DirectShow (compatíveis com FFmpeg dshow).
+    // Faz match com deviceId do browser removendo o sufixo USB "(xxxx:xxxx)" que
+    // o Chromium adiciona ao label mas que não faz parte do nome DirectShow.
+    dshowCamList = (dshow.video || []).map(name => {
+      const match = cams.find(d => {
+        const clean = d.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, '').trim()
+        return clean === name || d.label === name
+      })
+      return { label: name, deviceId: match ? match.deviceId : null }
+    })
+
+    // Fallback: se DirectShow não devolveu câmeras, usa browser API
+    if (dshowCamList.length === 0) {
+      dshowCamList = cams.map(d => ({ label: d.label, deviceId: d.deviceId }))
+    }
   } catch (e) {
     console.warn('[Devices] getDshowDevices falhou:', e.message)
+    dshowCamList = cams.map(d => ({ label: d.label, deviceId: d.deviceId }))
   }
 
   // Câmeras + restore de seleções salvas
   const saved = await garo.getSettings()
-  renderCameraList(cams, saved.cameras || [])
+  renderCameraList(dshowCamList, saved.cameras || [])
 
   if (saved.micDevice)      micSel.value = saved.micDevice
   if (saved.sysAudioDevice) document.getElementById('sys-audio-device').value = saved.sysAudioDevice
@@ -435,18 +456,29 @@ garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate, micDevice, cam
     // Câmeras para PiP
     const enabledCams = (cameras || []).filter(c => c.enabled)
     wgcCamStreams = []
-    for (const cam of enabledCams) {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        const dev = devices.find(d => d.kind === 'videoinput' && d.label === cam.name)
-        if (!dev) continue
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: dev.deviceId }, width: { ideal: 640 }, height: { ideal: 360 } },
-          audio: false,
-        })
-        wgcCamStreams.push({ stream, position: cam.position })
-      } catch (e) {
-        console.warn('[WGC] Camera:', cam.name, e.message)
+    if (enabledCams.length > 0) {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      for (const cam of enabledCams) {
+        try {
+          // Usa deviceId salvo em detectção; fallback: fuzzy match strip sufixo USB "(xxxx:xxxx)"
+          let deviceId = cam.deviceId || null
+          if (!deviceId) {
+            const dev = devices.find(d => {
+              if (d.kind !== 'videoinput') return false
+              const clean = d.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, '').trim()
+              return clean === cam.name || d.label === cam.name
+            })
+            deviceId = dev ? dev.deviceId : null
+          }
+          if (!deviceId) { console.warn('[WGC] Camera sem deviceId:', cam.name); continue }
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 360 } },
+            audio: false,
+          })
+          wgcCamStreams.push({ stream, position: cam.position })
+        } catch (e) {
+          console.warn('[WGC] Camera:', cam.name, e.message)
+        }
       }
     }
 
