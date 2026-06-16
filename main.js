@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, Tray, Menu, ipcMain, dialog, nativeImage, shell, screen, desktopCapturer } = require('electron')
+const { app, BrowserWindow, globalShortcut, Tray, Menu, ipcMain, dialog, nativeImage, shell, screen, desktopCapturer, session } = require('electron')
 const path = require('path')
 const os   = require('os')
 const fs   = require('fs')
@@ -9,14 +9,15 @@ let ffmpegPath
 try { ffmpegPath = require('ffmpeg-static') } catch { ffmpegPath = 'ffmpeg' }
 
 // Estado do modo WGC (MediaRecorder no renderer)
-let wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null }
+let wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null, hasAudio: false }
 
-async function convertWebmToMp4(webmPath, mp4Path) {
+async function convertWebmToMp4(webmPath, mp4Path, hasAudio = false) {
   const enc = detectedEncoder || 'libx264'
   const encArgs = (enc.includes('qsv') || enc.includes('amf') || enc.includes('nvenc'))
     ? ['-c:v', enc, '-b:v', '20M']
     : ['-c:v', 'libx264', '-preset', 'fast', '-crf', '23']
-  const args = ['-i', webmPath, ...encArgs, '-an', '-y', mp4Path]
+  const audioArgs = hasAudio ? ['-c:a', 'aac', '-b:a', '192k'] : ['-an']
+  const args = ['-i', webmPath, ...encArgs, ...audioArgs, '-y', mp4Path]
   console.log('[WGC→MP4] Args:', args.join(' '))
   return new Promise((resolve, reject) => {
     const proc = spawn(ffmpegPath, args, { windowsHide: true })
@@ -252,9 +253,11 @@ async function handleStart() {
       return
     }
     const tempPath = outputPath.replace('.mp4', '_wgc.webm')
-    wgcState = { active: true, writeStream: null, tempPath, outputPath }
+    const hasMic = !!(s.micDevice && s.micDevice !== '')
+    wgcState = { active: true, writeStream: null, tempPath, outputPath, hasAudio: hasMic }
     mainWindow && mainWindow.webContents.send('wgc-start', {
       sourceId, outputPath, tempPath, bitrate: s.bitrate || 20,
+      micDevice: s.micDevice || null,
     })
     return
   }
@@ -302,7 +305,8 @@ async function handleStart() {
     bitrate:         s.bitrate,
     encoder,
     fallbackEncoder: detectedEncoder,
-    captureAudio:    false,
+    micDevice:       s.micDevice       || null,
+    sysAudioDevice:  s.sysAudioDevice  || null,
     source,
   })
 }
@@ -318,7 +322,7 @@ function handleStop() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 480,
-    height: 580,
+    height: 720,
     resizable: false,
     backgroundColor: '#0f0f1a',
     title: 'Garo Producoes',
@@ -328,6 +332,11 @@ function createWindow() {
       nodeIntegration: false,
     },
     show: false,
+  })
+
+  // Auto-aprova permissoes de midia (microfone/camera) para pagina local
+  session.defaultSession.setPermissionRequestHandler((_, permission, callback) => {
+    callback(['media', 'mediaKeySystem'].includes(permission))
   })
 
   mainWindow.loadFile('src/ui/index.html')
@@ -476,7 +485,7 @@ ipcMain.handle('wgc-finalize', async (_, outputPath) => {
   }
   try {
     mainWindow && mainWindow.webContents.send('recording-warn', { message: 'Convertendo para MP4...' })
-    await convertWebmToMp4(wgcState.tempPath, outputPath)
+    await convertWebmToMp4(wgcState.tempPath, outputPath, wgcState.hasAudio)
     try { fs.unlinkSync(wgcState.tempPath) } catch {}
     console.log('[WGC] Convertido com sucesso:', outputPath)
   } catch (e) {
@@ -498,6 +507,32 @@ ipcMain.handle('wgc-error', async (_, msg) => {
   wgcState = { active: false, writeStream: null, tempPath: null, outputPath: null }
   updateTray()
   mainWindow && mainWindow.webContents.send('recording-error', { message: 'WGC: ' + msg })
+})
+
+ipcMain.handle('get-dshow-devices', () => {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, ['-f', 'dshow', '-list_devices', 'true', '-i', 'dummy'], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let stderr = ''
+    proc.stderr.on('data', d => { stderr += d.toString() })
+    proc.on('close', () => {
+      const audio = [], video = []
+      let section = ''
+      for (const line of stderr.split('\n')) {
+        if (/DirectShow video devices/i.test(line)) { section = 'video'; continue }
+        if (/DirectShow audio devices/i.test(line)) { section = 'audio'; continue }
+        const m = line.match(/\[dshow[^\]]*\]\s+"([^"]+)"/)
+        if (!m) continue
+        if (section === 'audio') audio.push(m[1])
+        if (section === 'video') video.push(m[1])
+      }
+      console.log('[DShow] Audio:', audio, '| Video:', video)
+      resolve({ audio, video })
+    })
+    proc.on('error', () => resolve({ audio: [], video: [] }))
+  })
 })
 
 ipcMain.handle('get-recent', () => {

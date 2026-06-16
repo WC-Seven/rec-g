@@ -77,7 +77,7 @@ class Recorder extends EventEmitter {
   }
 
   _buildEncoderArgs(encoder, bitrate) {
-    const args = ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p', '-c:v', encoder]
+    const args = ['-c:v', encoder]
     if (encoder === 'hevc_amf' || encoder === 'h264_amf') {
       args.push('-b:v', `${bitrate}M`)
     } else if (encoder === 'hevc_nvenc' || encoder === 'h264_nvenc') {
@@ -85,20 +85,50 @@ class Recorder extends EventEmitter {
     } else if (encoder === 'hevc_qsv' || encoder === 'h264_qsv') {
       args.push('-b:v', `${bitrate}M`)
     } else {
-      // libx264 / libx265 CPU
       args.push('-preset', 'fast', '-crf', '23')
     }
     return args
   }
 
   _buildArgs(settings, encoder) {
-    const { outputPath, fps, bitrate, source } = settings
-    return [
-      ...this._buildVideoArgs(fps, source),
-      ...this._buildEncoderArgs(encoder, bitrate),
-      '-an',
-      '-y', outputPath,
-    ]
+    const { outputPath, fps, bitrate, source, micDevice, sysAudioDevice } = settings
+    const hasMic = !!(micDevice && micDevice !== '')
+    const hasSys = !!(sysAudioDevice && sysAudioDevice !== '')
+    const VF = 'scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p'
+
+    const videoIn = this._buildVideoArgs(fps, source)
+    const encArgs = this._buildEncoderArgs(encoder, bitrate)
+
+    if (hasMic && hasSys) {
+      return [
+        ...videoIn,
+        '-f', 'dshow', '-i', `audio=${micDevice}`,
+        '-f', 'dshow', '-i', `audio=${sysAudioDevice}`,
+        '-filter_complex', `[0:v]${VF}[vout];[1:a][2:a]amix=inputs=2:duration=first[aout]`,
+        '-map', '[vout]', '-map', '[aout]',
+        ...encArgs,
+        '-c:a', 'aac', '-b:a', '192k',
+        '-y', outputPath,
+      ]
+    } else if (hasMic || hasSys) {
+      const audioName = hasMic ? micDevice : sysAudioDevice
+      return [
+        ...videoIn,
+        '-f', 'dshow', '-i', `audio=${audioName}`,
+        '-vf', VF,
+        ...encArgs,
+        '-c:a', 'aac', '-b:a', '192k',
+        '-y', outputPath,
+      ]
+    } else {
+      return [
+        ...videoIn,
+        '-vf', VF,
+        ...encArgs,
+        '-an',
+        '-y', outputPath,
+      ]
+    }
   }
 
   start(settings) {

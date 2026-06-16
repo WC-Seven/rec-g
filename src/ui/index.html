@@ -76,10 +76,30 @@
     </div>
 
     <div class="row">
-      <label title="Captura de áudio indisponível nesta versão.&#10;Em breve: suporte a DirectShow (Stereo Mix).">
+      <label title="Microfone para narração ou voz.&#10;Funciona nos modos FFmpeg e WGC.">
+        Microfone <span class="hint">(?)</span>
+      </label>
+      <select id="mic-device">
+        <option value="">Nenhum</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label title="Captura o som reproduzido no computador.&#10;Disponível apenas no modo FFmpeg.&#10;Requer 'Stereo Mix' habilitado nas configurações de som do Windows.">
         Áudio sistema <span class="hint">(?)</span>
       </label>
-      <span style="color:#666;font-size:12px;align-self:center">indisponível</span>
+      <select id="sys-audio-device">
+        <option value="">Nenhum</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label title="Câmera detectada no sistema.&#10;Gravação com webcam em desenvolvimento.">
+        Webcam <span class="hint">(?)</span>
+      </label>
+      <select id="webcam-device">
+        <option value="">Nenhuma</option>
+      </select>
     </div>
 
     <div class="row">

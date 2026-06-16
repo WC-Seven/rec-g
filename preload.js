@@ -11,8 +11,9 @@ contextBridge.exposeInMainWorld('garo', {
   openFile:       (p) => ipcRenderer.invoke('open-file', p),
   openFolder:     (p) => ipcRenderer.invoke('open-folder', p),
   getRecent:      ()  => ipcRenderer.invoke('get-recent'),
-  getSources:     ()  => ipcRenderer.invoke('get-sources'),
-  getDisplays:    ()  => ipcRenderer.invoke('get-displays'),
+  getSources:      ()  => ipcRenderer.invoke('get-sources'),
+  getDisplays:     ()  => ipcRenderer.invoke('get-displays'),
+  getDshowDevices: ()  => ipcRenderer.invoke('get-dshow-devices'),
 
   // WGC mode
   wgcStartWrite:  (t) => ipcRenderer.invoke('wgc-start-write', t),

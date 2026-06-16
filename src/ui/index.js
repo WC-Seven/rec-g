@@ -92,18 +92,24 @@ function applySettings(s) {
     const icon = s.source.type === 'window' ? '🗔' : '🖥'
     document.getElementById('btn-source').textContent = `${icon} ${s.source.name}`
   }
+  // Restore audio/webcam selections after devices are loaded
+  if (s.micDevice)      { const el = document.getElementById('mic-device');      if (el) el.value = s.micDevice }
+  if (s.sysAudioDevice) { const el = document.getElementById('sys-audio-device'); if (el) el.value = s.sysAudioDevice }
+  if (s.webcamDevice)   { const el = document.getElementById('webcam-device');   if (el) el.value = s.webcamDevice }
 }
 
 async function collectSettings() {
   const saved = await garo.getSettings()
   return {
-    encoder:      document.getElementById('encoder').value,
-    fps:          parseInt(document.getElementById('fps').value),
-    bitrate:      parseInt(bitrateSlider.value),
-    captureMode:  document.getElementById('capture-mode').value,
-    captureAudio: false,
-    outputFolder: document.getElementById('output-folder').value,
-    source:       saved.source || { type: 'desktop', name: 'Tela inteira' },
+    encoder:        document.getElementById('encoder').value,
+    fps:            parseInt(document.getElementById('fps').value),
+    bitrate:        parseInt(bitrateSlider.value),
+    captureMode:    document.getElementById('capture-mode').value,
+    outputFolder:   document.getElementById('output-folder').value,
+    micDevice:      document.getElementById('mic-device')?.value       || '',
+    sysAudioDevice: document.getElementById('sys-audio-device')?.value || '',
+    webcamDevice:   document.getElementById('webcam-device')?.value    || '',
+    source:         saved.source || { type: 'desktop', name: 'Tela inteira' },
   }
 }
 
@@ -134,7 +140,7 @@ function applyRecommendations(detectedEncoder, monitorHz) {
 garo.onInit(async ({ settings, detectedEncoder, monitorHz }) => {
   applySettings(settings)
   applyRecommendations(detectedEncoder, monitorHz)
-  await loadRecent()
+  await Promise.all([loadRecent(), loadMediaDevices()])
 })
 
 // Fallback se onInit disparou antes do listener
@@ -144,7 +150,6 @@ setTimeout(async () => {
     applySettings(data.settings)
     applyRecommendations(data.detectedEncoder, data.monitorHz)
   } catch (e) {
-    // getInitData indisponivel, busca separado
     try {
       const s = await garo.getSettings()
       applySettings(s)
@@ -152,7 +157,7 @@ setTimeout(async () => {
       applyRecommendations(detected, null)
     } catch {}
   }
-  await loadRecent()
+  await Promise.all([loadRecent(), loadMediaDevices()])
 }, 400)
 
 // Botão gravar
@@ -169,7 +174,69 @@ btnRecord.addEventListener('click', async () => {
 document.getElementById('encoder').addEventListener('change', autoSave)
 document.getElementById('fps').addEventListener('change', autoSave)
 document.getElementById('capture-mode').addEventListener('change', autoSave)
+document.getElementById('mic-device').addEventListener('change', autoSave)
+document.getElementById('sys-audio-device').addEventListener('change', autoSave)
+document.getElementById('webcam-device').addEventListener('change', autoSave)
 bitrateSlider.addEventListener('change', autoSave)
+
+// ── Detecção de dispositivos de áudio e vídeo ─────────────────
+async function loadMediaDevices() {
+  // Solicita permissão de microfone para obter labels nos dispositivos
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true })
+    s.getTracks().forEach(t => t.stop())
+  } catch (e) {
+    console.warn('[Devices] Permissao de microfone negada:', e.message)
+  }
+
+  // Browser API: microfones e webcams
+  let browserDevices = []
+  try { browserDevices = await navigator.mediaDevices.enumerateDevices() } catch {}
+
+  const mics = browserDevices.filter(d =>
+    d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications' && d.label
+  )
+  const cams = browserDevices.filter(d => d.kind === 'videoinput' && d.label)
+
+  // Popula Microfone (label = nome DirectShow, usado no FFmpeg dshow)
+  const micSel = document.getElementById('mic-device')
+  mics.forEach(d => {
+    const opt = document.createElement('option')
+    opt.value = d.label
+    opt.textContent = d.label
+    micSel.appendChild(opt)
+  })
+
+  // DirectShow: áudio sistema (Stereo Mix etc.) e webcams adicionais
+  try {
+    const dshow = await garo.getDshowDevices()
+    const sysSel = document.getElementById('sys-audio-device')
+    ;(dshow.audio || []).forEach(name => {
+      const opt = document.createElement('option')
+      opt.value = name
+      opt.textContent = name
+      sysSel.appendChild(opt)
+    })
+
+    const camSel = document.getElementById('webcam-device')
+    const camList = cams.length > 0 ? cams.map(d => ({ value: d.label, label: d.label }))
+      : (dshow.video || []).map(n => ({ value: n, label: n }))
+    camList.forEach(d => {
+      const opt = document.createElement('option')
+      opt.value = d.value
+      opt.textContent = d.label
+      camSel.appendChild(opt)
+    })
+  } catch (e) {
+    console.warn('[Devices] getDshowDevices falhou:', e.message)
+  }
+
+  // Restaura seleções salvas (após população)
+  const saved = await garo.getSettings()
+  if (saved.micDevice)      { micSel.value = saved.micDevice }
+  if (saved.sysAudioDevice) { document.getElementById('sys-audio-device').value = saved.sysAudioDevice }
+  if (saved.webcamDevice)   { document.getElementById('webcam-device').value    = saved.webcamDevice }
+}
 
 // ── Seletor de fonte ──────────────────────────────────────────
 let allSources = []
@@ -289,23 +356,36 @@ document.getElementById('btn-refresh').addEventListener('click', loadRecent)
 let wgcRecorder = null
 let wgcStream   = null
 
-garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate }) => {
+garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate, micDevice }) => {
+  let micStream = null
   try {
     wgcStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource:   'desktop',
-          chromeMediaSourceId: sourceId,
-          maxFrameRate: 60,
-        },
-      },
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxFrameRate: 60 } },
     })
+
+    // Captura microfone se selecionado
+    if (micDevice) {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const match = devices.find(d => d.kind === 'audioinput' && d.label === micDevice)
+        const audioConstraint = match ? { deviceId: { exact: match.deviceId } } : true
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint, video: false })
+      } catch (e) {
+        console.warn('[WGC] Microfone indisponivel:', e.message)
+        showToast('Microfone indisponivel, gravando sem audio', 4000)
+      }
+    }
+
+    // Combina tracks de video + microfone
+    const tracks = [...wgcStream.getVideoTracks()]
+    if (micStream) tracks.push(...micStream.getAudioTracks())
+    const combinedStream = new MediaStream(tracks)
 
     const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=h264', 'video/webm']
       .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm'
 
-    wgcRecorder = new MediaRecorder(wgcStream, {
+    wgcRecorder = new MediaRecorder(combinedStream, {
       mimeType,
       videoBitsPerSecond: Math.min(bitrate || 20, 80) * 1024 * 1024,
     })
@@ -314,24 +394,24 @@ garo.onWgcStart(async ({ sourceId, outputPath, tempPath, bitrate }) => {
 
     wgcRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
-        e.data.arrayBuffer().then(buf => {
-          garo.wgcChunk(Array.from(new Uint8Array(buf)))
-        })
+        e.data.arrayBuffer().then(buf => garo.wgcChunk(Array.from(new Uint8Array(buf))))
       }
     }
 
     wgcRecorder.onstop = async () => {
       wgcStream && wgcStream.getTracks().forEach(t => t.stop())
+      micStream && micStream.getTracks().forEach(t => t.stop())
       wgcStream = null
       await garo.wgcFinalize(outputPath)
     }
 
     wgcRecorder.start(1000)
-    console.log('[WGC] Iniciado com', mimeType)
+    console.log('[WGC] Iniciado com', mimeType, micDevice ? '+ mic' : '')
 
   } catch (e) {
     console.error('[WGC] Erro:', e)
     wgcStream && wgcStream.getTracks().forEach(t => t.stop())
+    micStream && micStream.getTracks().forEach(t => t.stop())
     wgcStream = null
     await garo.wgcError(e.message)
   }
